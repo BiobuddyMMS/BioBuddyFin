@@ -1,0 +1,16 @@
+{
+  "name": "biobuddy-line-bot",
+  "version": "1.0.0",
+  "description": "A LINE bot for the 'Who is it?' animal kingdom game.",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@line/bot-sdk": "^8.4.1",
+    "express": "^4.18.2"
+  },
+  "engines": {
+    "node": "18.x"
+  }
+}
