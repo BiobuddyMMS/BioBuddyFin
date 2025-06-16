@@ -155,8 +155,17 @@ async function handleEvent(event) {
             replied = true;
         }
         if (soloSession) {
+             const secretAnimal = soloSession.secretAnimal;
             delete soloSessions[userId];
-            replied = true;
+            const revealMessage = {
+                type: 'text',
+                text: `ยอมแพ้เหรอ! ไม่เป็นไรนะ 🤓\n\nสัตว์ที่ฉันคิดไว้คือ "${secretAnimal}" ไงล่ะ!\n\nอยากลองใหม่ไหม?`,
+                quickReply: { items: [
+                    { type: 'action', action: { type: 'message', label: 'ฝึกเล่นอีกครั้ง 🤖', text: 'ฝึกเล่น' } },
+                    { type: 'action', action: { type: 'message', label: 'แข่งกับเพื่อน ⚔️', text: 'สร้างเกม' } }
+                ]}
+            };
+            return client.replyMessage(event.replyToken, revealMessage);
         }
 
         if (replied) {
@@ -267,7 +276,7 @@ async function handleEvent(event) {
                   await client.pushMessage(room.players[opponentTeam].id, { type: 'text', text: `ทีม ${room.players[userTeam].name} ทอยได้ ${diceRoll} แต้ม!` });
                 }
                 
-                if (room.players.red.hasRolled && room.players.blue.hasRol норма) {
+                if (room.players.red.hasRolled && room.players.blue.hasRolled) {
                     let resultText = "ทอยกันครบแล้ว! ผลคือ...\n\n";
                     let turnAnnounce;
                     if (room.players.red.diceScore > room.players.blue.diceScore) {
@@ -281,17 +290,18 @@ async function handleEvent(event) {
                         turnAnnounce = `แต้มเท่ากันเฉย! งั้น...ให้ทีม ${room.players.red.name} เริ่มก่อนละกัน! 😜`;
                     }
                     room.state = 'playing';
-                    const startMessage = resultText + turnAnnounce + '\n\nพิมพ์ "แนะนำคำถาม" เพื่อให้ BioBuddy ช่วยไกด์ได้เลย!';
+                    const startMessage = resultText + '\n\n' + turnAnnounce + '\n\nพิมพ์ "แนะนำคำถาม" เพื่อให้ BioBuddy ช่วยไกด์ได้เลย!';
                     await client.pushMessage(room.players.red.id, { type: 'text', text: startMessage });
                     await client.pushMessage(room.players.blue.id, { type: 'text', text: startMessage });
                 } else {
-                    await client.replyMessage(event.replyToken, { type: 'text', text: `รอทีม ${opponentTeam} ทอยต่อเลย!` });
+                    const nextTeamToRoll = room.players[opponentTeam] ? room.players[opponentTeam].name : 'อีกทีม';
+                    await client.replyMessage(event.replyToken, { type: 'text', text: `รอทีม ${nextTeamToRoll} ทอยต่อเลย!` });
                 }
             }
         }
         if (room.state === 'playing') {
             if (room.currentTurn !== userTeam) {
-                return client.replyMessage(event.replyToken, { type: 'text', text: 'ใจเย็นเพื่อนซี้! ยังไม่ถึงตาของเธอนะ (แต่แอบเช็คข้อมูลสัตว์ตัวเองได้นะ 🤫)' });
+                return client.replyMessage(event.replyToken, { type: 'text', text: 'ใจเย็นเพื่อนซี้! ยังไม่ถึงตาของเธอนะ (แต่แอบ "เช็ค" ข้อมูลสัตว์ตัวเองได้นะ 🤫)' });
             }
 
             if (userMessage.match(/(แนะนำคำถาม|ขอคำถาม|ถามไรดี|ไกด์หน่อย)/i)) {
@@ -383,14 +393,17 @@ async function handleEvent(event) {
         }
     }
 
-    // Game Starting Commands & Default
+
+    // --- Game Starting Commands & Default ---
     if (!room && !soloSession) {
+        // Start Practice Mode
         if (userMessage.match(/(ฝึกเล่น|เล่นคนเดียว|เล่นกับบอท)/i)) {
             const secretAnimal = allAnimalNames[Math.floor(Math.random() * allAnimalNames.length)];
             soloSessions[userId] = { mode: 'practice', secretAnimal: secretAnimal };
             console.log(`[Practice Mode Started] User: ${userId}, Secret Animal: ${secretAnimal}`);
             return client.replyMessage(event.replyToken, { type: 'text', text: "เริ่มโหมดฝึกเล่น! 🤖\n\nบัดดี้เลือกสัตว์ปริศนาไว้ในใจแล้ว 1 ตัว... ลองถามคำถามเพื่อทายดูสิ!" });
         }
+        // Start 2-Player Game
         if (userMessage.match(/(สร้างเกม|สร้างห้อง|เริ่มเกม|เริ่มตี้)/i)) {
             const gameId = `B${Math.floor(100 + Math.random() * 900)}`;
             gameRooms[gameId] = { id: gameId, state: 'waiting', players: { red: { id: userId, name: 'สีแดง ❤️‍🔥', secretAnimal: null, remainingAnimals: [...allAnimalNames], hasRolled: false, diceScore: 0 }, blue: null }, currentTurn: null, lastQuestion: null, turnBonus: 0 };
