@@ -34,30 +34,40 @@ function findUserRoom(userId) {
 
 // --- 4. ฟังก์ชันหลักของเกม ---
 function recommendQuestion(remainingAnimals) {
+    if (remainingAnimals.length <= 1) {
+        return null;
+    }
     const traitScores = {};
+    const half = remainingAnimals.length / 2;
+    const askedTraits = {}; // ในโหมดฝึกเล่น จะใช้ตัวนี้ชั่วคราว
+
     remainingAnimals.forEach(animal => {
-        const traits = animalData[animal];
-        for (let trait in traits) {
-            if (['ลักษณะเด่น', 'สาระน่ารู้', 'Phylum'].includes(trait)) continue;
-            const key = `${trait}#${traits[trait]}`;
-            traitScores[key] = (traitScores[key] || 0) + 1;
+        for (const trait in animalData[animal]) {
+            if (askedTraits[trait] || ['ลักษณะเด่น', 'สาระน่ารู้', 'Phylum'].includes(trait)) {
+                continue;
+            }
+            if (!traitScores[trait]) {
+                traitScores[trait] = 0;
+            }
+            if (animalData[animal][trait] === 'ใช่') {
+                traitScores[trait]++;
+            }
         }
     });
 
-    let bestQuestion = null;
-    let minDifference = remainingAnimals.length;
-    for (const key in traitScores) {
-        const [trait, value] = key.split('#');
-        const yesCount = traitScores[key];
-        const noCount = remainingAnimals.length - yesCount;
-        const difference = Math.abs(yesCount - noCount);
-        if (difference < minDifference) {
-            minDifference = difference;
-            bestQuestion = { trait, value };
+    let bestTrait = null;
+    let bestScore = -1;
+
+    for (const trait in traitScores) {
+        const score = Math.abs(half - traitScores[trait]);
+        if (score < bestScore || bestScore === -1) {
+            bestScore = score;
+            bestTrait = trait;
         }
     }
-    return bestQuestion;
+    return bestTrait;
 }
+
 
 // --- 5. WEBHOOK และตัวจัดการ EVENT ---
 app.post('/webhook', line.middleware(config), (req, res) => {
@@ -71,7 +81,7 @@ app.post('/webhook', line.middleware(config), (req, res) => {
 });
 
 async function handleEvent(event) {
-    if (event.type === 'follow') {
+    if (event.type === 'follow' || (event.type === 'message' && event.message.text.toLowerCase() === 'เมนู')) {
         const welcomeMessage = {
             type: 'text',
             text: 'ว่าไงเพื่อนซี้! ยินดีต้อนรับสู่ BioBuddy 🧬✨\n\nฉันคือบอทช่วยสอนเรื่องอาณาจักรสัตว์ในรูปแบบเกม "Who is it?" สนุกและได้ความรู้แน่นอน!\n\nเลือกโหมดที่อยากเล่นจากเมนูด้านล่างได้เลย 👇',
@@ -93,6 +103,7 @@ async function handleEvent(event) {
     const userMessage = event.message.text.trim();
     const userId = event.source.userId;
 
+    // --- Global Commands ---
     const infoMatch = userMessage.match(/(?:ขอข้อมูล|อยากรู้เกี่ยวกับ|ข้อมูลของ|ดูข้อมูล|บอกข้อมูล|ลักษณะของ)\s*(.+)/i);
     if (infoMatch) {
         const animalName = infoMatch[1].trim();
@@ -119,30 +130,31 @@ async function handleEvent(event) {
             '   - นำคำถามไปถามอีกทีม แล้วกลับมาตอบบอทด้วย "ใช่" หรือ "ไม่ใช่"\n' +
             '   - บอทจะแสดงรายชื่อสัตว์ที่ถูกตัดออกและที่เหลือให้\n\n' +
             '**2. ฝึกเล่นกับบอท (1 คน):**\n' +
-            '   - พิมพ์ "ฝึกเล่น" เพื่อเริ่ม\n' +
+            '   - พิมพ์ "ฝึกเล่น" เพื่อเริ่มเกม\n' +
             '   - บอทจะคิดสัตว์ 1 ตัว\n' +
             '   - ถามคำถามคุณสมบัติ เช่น "มีขนใช่ไหม?"\n' +
             '   - มั่นใจแล้วพิมพ์ "ทาย: [ชื่อสัตว์]"\n\n' +
             '💡 **ตัวช่วย (ใช้ได้ทุกเมื่อ):**\n' +
-            '   - พิมพ์ "เช็ค: [ลักษณะ]" เพื่อถามข้อมูลสัตว์ลับของตัวเอง\n' +
-            '   - พิมพ์ "จบเกม" เพื่อออกจากโหมดปัจจุบันได้ตลอดเวลา';
+            '   - พิมพ์ "ข้อมูลของ [ชื่อสัตว์]" เพื่อดูข้อมูลสัตว์ตัวนั้นๆ\n' +
+            '   - พิมพ์ "เช็ค: [ลักษณะ]" เพื่อถามข้อมูลสัตว์ลับของตัวเอง (เฉพาะโหมด 2 คน)\n' +
+            '   - พิมพ์ "จบเกม" หรือ "ยอมแพ้" เพื่อออกจากโหมดปัจจุบันได้ตลอดเวลา';
         return client.replyMessage(event.replyToken, { type: 'text', text: ruleText });
     }
 
     const room = findUserRoom(userId);
     const soloSession = soloSessions[userId];
     
-    if (userMessage.match(/(จบเกม|ออกเกม)/i)) {
+    if (userMessage.match(/(จบเกม|ยอมแพ้|ออกเกม)/i)) {
         let replied = false;
-        if(room) {
+        if (room) {
             const opponentTeam = room.players.red.id === userId ? 'blue' : 'red';
-            if(room.players[opponentTeam]) {
-                await client.pushMessage(room.players[opponentTeam].id, { type: 'text', text: `อีกทีมขอจบเกมแล้ว! ไว้มาเล่นกันใหม่นะ 😉` }).catch(err => console.error("Error pushing end game message:", err));
+            if (room.players[opponentTeam]) {
+                await client.pushMessage(room.players[opponentTeam].id, { type: 'text', text: `อีกทีมขอจบเกมแล้ว! ไว้มาเล่นกันใหม่นะ 😉` }).catch(err => console.error("Push message failed:", err));
             }
             delete gameRooms[room.id];
             replied = true;
         }
-        if(soloSession) {
+        if (soloSession) {
             delete soloSessions[userId];
             replied = true;
         }
@@ -160,7 +172,7 @@ async function handleEvent(event) {
             return client.replyMessage(event.replyToken, goodbyeMessage);
         }
     }
-
+    
     // --- PRACTICE MODE (1 Player) ---
     if (soloSession) {
         const practiceQuestionMatch = userMessage.match(/(?:มี|มันมี)\s*(.+?)\s*(?:มั้ย|ไหม|ใช่ป่ะ|รึเปล่า)\??$/i);
@@ -176,7 +188,6 @@ async function handleEvent(event) {
             }
             return client.replyMessage(event.replyToken, { type: 'text', text: foundMatch ? 'ใช่ ✅' : 'ไม่ใช่ ❌' });
         }
-
         const guessMatch = userMessage.match(/(?:ทาย|ตอบว่า|คำตอบคือ)[:：\s]*(.+)/i);
         if (guessMatch) {
             const guessedAnimal = guessMatch[1].trim();
@@ -200,7 +211,6 @@ async function handleEvent(event) {
     // --- ROOM GAME (2 Players) ---
     if (room) {
         const userTeam = room.players.red.id === userId ? 'red' : 'blue';
-
         const checkMatch = userMessage.match(/^(?:เช็ค|สัตว์เรามี|ของเรามี|ดูข้อมูล)[\s:：]*(.+?)\s*(?:มั้ย|ไหม|ใช่ป่ะ|รึเปล่า)\??$/i);
         if (checkMatch) {
             const traitToCheck = checkMatch[1].trim().toLowerCase();
@@ -216,7 +226,6 @@ async function handleEvent(event) {
                     break;
                 }
             }
-            
             if (foundTrait) {
                 const replyText = `เช็คให้แล้วนะ! สัตว์ลับของเธอ ("${secretAnimal}")...\n\n` + `Q: "${foundTrait}"?\nA: **${foundValue}**\n\nใช้ข้อมูลนี้ไปตอบอีกทีมได้เลย! 😉`;
                 return client.replyMessage(event.replyToken, { type: 'text', text: replyText });
@@ -252,40 +261,43 @@ async function handleEvent(event) {
                 room.players[userTeam].diceScore = diceRoll;
                 room.players[userTeam].hasRolled = true;
                 
-                const opponentTeam = userTeam === 'red' ? 'blue' : 'red';
-                await client.pushMessage(room.players[opponentTeam].id, { type: 'text', text: `ทีม ${room.players[userTeam].name} ทอยได้ ${diceRoll} แต้ม!` });
                 await client.replyMessage(event.replyToken, { type: 'text', text: `เธอทอยได้ ${diceRoll} แต้ม! 🎲` });
+                const opponentTeam = userTeam === 'red' ? 'blue' : 'red';
+                if(room.players[opponentTeam]) {
+                  await client.pushMessage(room.players[opponentTeam].id, { type: 'text', text: `ทีม ${room.players[userTeam].name} ทอยได้ ${diceRoll} แต้ม!` });
+                }
                 
-                if (room.players.red.hasRolled && room.players.blue.hasRolled) {
+                if (room.players.red.hasRolled && room.players.blue.hasRol норма) {
                     let resultText = "ทอยกันครบแล้ว! ผลคือ...\n\n";
+                    let turnAnnounce;
                     if (room.players.red.diceScore > room.players.blue.diceScore) {
                         room.currentTurn = 'red';
-                        resultText += `ทีม ${room.players.red.name} แต้มตึงกว่า! ได้เริ่มถามก่อนเลย จัดไป!`;
+                        turnAnnounce = `ทีม ${room.players.red.name} แต้มตึงกว่า! ได้เริ่มถามก่อนเลย จัดไป!`;
                     } else if (room.players.blue.diceScore > room.players.red.diceScore) {
                         room.currentTurn = 'blue';
-                        resultText += `ทีม ${room.players.blue.name} แต้มเหนือกว่า! ได้เริ่มถามก่อนนะค้าบ!`;
+                        turnAnnounce = `ทีม ${room.players.blue.name} แต้มเหนือกว่า! ได้เริ่มถามก่อนนะค้าบ!`;
                     } else {
                         room.currentTurn = 'red'; // Tie-break
-                        resultText += `แต้มเท่ากันเฉย! งั้น...ให้ทีม ${room.players.red.name} เริ่มก่อนละกัน! 😜`;
+                        turnAnnounce = `แต้มเท่ากันเฉย! งั้น...ให้ทีม ${room.players.red.name} เริ่มก่อนละกัน! 😜`;
                     }
                     room.state = 'playing';
-                    const startMessage = resultText + '\n\nพิมพ์ "แนะนำคำถาม" เพื่อให้ BioBuddy ช่วยไกด์ได้เลย!';
+                    const startMessage = resultText + turnAnnounce + '\n\nพิมพ์ "แนะนำคำถาม" เพื่อให้ BioBuddy ช่วยไกด์ได้เลย!';
                     await client.pushMessage(room.players.red.id, { type: 'text', text: startMessage });
                     await client.pushMessage(room.players.blue.id, { type: 'text', text: startMessage });
                 } else {
-                    await client.replyMessage(event.replyToken, { type: 'text', text: `รอทีม ${room.players[opponentTeam].name} ทอยต่อเลย!` });
+                    await client.replyMessage(event.replyToken, { type: 'text', text: `รอทีม ${opponentTeam} ทอยต่อเลย!` });
                 }
             }
         }
         if (room.state === 'playing') {
             if (room.currentTurn !== userTeam) {
-                return client.replyMessage(event.replyToken, { type: 'text', text: 'ใจเย็นเพื่อนซี้! ยังไม่ถึงตาของเธอนะ (แต่แอบ "เช็ค" ข้อมูลสัตว์ตัวเองได้นะ 🤫)' });
+                return client.replyMessage(event.replyToken, { type: 'text', text: 'ใจเย็นเพื่อนซี้! ยังไม่ถึงตาของเธอนะ (แต่แอบเช็คข้อมูลสัตว์ตัวเองได้นะ 🤫)' });
             }
 
             if (userMessage.match(/(แนะนำคำถาม|ขอคำถาม|ถามไรดี|ไกด์หน่อย)/i)) {
                 const questionTrait = recommendQuestion(room.players[userTeam].remainingAnimals);
                 if (questionTrait) {
-                    room.lastQuestion = { trait: questionTrait, value: 'ใช่' };
+                    room.lastQuestion = { trait: questionTrait };
                     return client.replyMessage(event.replyToken, { type: 'text', text: `จัดไป! เอาคำถามนี้ไปถามอีกฝั่งเลย:\n\n"สัตว์ของอีกฝั่ง... **${questionTrait}**... ใช่ไหม?"` });
                 } else {
                     return client.replyMessage(event.replyToken, { type: 'text', text: "อุ๊ย! ไม่มีคำถามแนะนำแล้วอ่ะ ลองทายเลยมั้ย?" });
@@ -371,8 +383,7 @@ async function handleEvent(event) {
         }
     }
 
-
-    // --- Game Starting Commands & Default ---
+    // Game Starting Commands & Default
     if (!room && !soloSession) {
         if (userMessage.match(/(ฝึกเล่น|เล่นคนเดียว|เล่นกับบอท)/i)) {
             const secretAnimal = allAnimalNames[Math.floor(Math.random() * allAnimalNames.length)];
